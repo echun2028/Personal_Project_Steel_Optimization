@@ -523,6 +523,47 @@ body {
     border-top: 1px solid #e9ecef;
 }
 
+.config-section {
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    text-align: left;
+}
+
+.config-section h4 {
+    margin-bottom: 0.5rem;
+    color: #495057;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.config-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.config-item label {
+    font-size: 0.9rem;
+    color: #6c757d;
+    min-width: 150px;
+}
+
+.config-item input {
+    width: 80px;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.config-item span {
+    font-size: 0.9rem;
+    color: #6c757d;
+}
+
 .optimize-info {
     margin-top: 1rem;
     color: #666;

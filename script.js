@@ -12,6 +12,11 @@ class SteelOptimizer {
         this.addInitialRow();
     }
 
+    getMinUsableLength() {
+        const thresholdInput = document.getElementById('usableThreshold');
+        return thresholdInput ? parseFloat(thresholdInput.value) * 1000 : 100; // Convert m to mm
+    }
+
     initializeEventListeners() {
         document.getElementById('addRowBtn').addEventListener('click', () => this.addRow());
         document.getElementById('clearAllBtn').addEventListener('click', () => this.clearAll());
@@ -39,10 +44,10 @@ class SteelOptimizer {
                 </select>
             </td>
             <td>
-                <input type="number" class="length-input" placeholder="Length (mm)" min="1" max="8000" required>
+                <input type="number" class="length-input" placeholder="Length (m)" min="0.1" max="8" step="0.1" required>
             </td>
             <td>
-                <input type="number" class="quantity-input" placeholder="Quantity" min="1" max="100" required>
+                <input type="number" class="quantity-input" placeholder="Quantity" min="1" required>
             </td>
             <td>
                 <button type="button" class="remove-row-btn" onclick="steelOptimizer.removeRow(this)">Remove</button>
@@ -52,6 +57,24 @@ class SteelOptimizer {
         tbody.appendChild(row);
         this.rowCount++;
         this.updateOptimizeButton();
+        
+        // Add tooltips to the new row elements
+        this.addTooltipsToRow(row);
+    }
+
+    addTooltipsToRow(row) {
+        const tooltips = {
+            'width-select': 'Select the width of the steel bar from standard sizes',
+            'length-input': 'Enter the required length in meters (max 8.0m)',
+            'quantity-input': 'Enter the number of pieces needed'
+        };
+
+        Object.keys(tooltips).forEach(selector => {
+            const element = row.querySelector('.' + selector);
+            if (element) {
+                element.title = tooltips[selector];
+            }
+        });
     }
 
     removeRow(button) {
@@ -84,14 +107,46 @@ class SteelOptimizer {
         const rows = document.querySelectorAll('#inputTableBody tr');
         if (rows.length === 0) return false;
 
+        let totalDemand = 0;
+        const warnings = [];
+
         for (const row of rows) {
             const width = row.querySelector('.width-select').value;
             const length = row.querySelector('.length-input').value;
             const quantity = row.querySelector('.quantity-input').value;
 
             if (!width || !length || !quantity) return false;
-            if (parseInt(length) <= 0 || parseInt(length) > this.baseLength) return false;
-            if (parseInt(quantity) <= 0) return false;
+            
+            const lengthInMm = parseFloat(length) * 1000; // Convert meters to mm
+            const quantityNum = parseInt(quantity);
+            
+            // Basic validation
+            if (lengthInMm <= 0 || lengthInMm > this.baseLength) return false;
+            if (quantityNum <= 0) return false;
+            
+            // Sanity checks
+            totalDemand += quantityNum;
+            
+            // Warn if single piece equals base length (causes many single-piece bars)
+            if (lengthInMm === this.baseLength) {
+                warnings.push(`Piece ${width}mm x ${length}m equals full bar length - will create single-piece bars`);
+            }
+            
+            // Warn if quantity is very large
+            if (quantityNum > 1000) {
+                warnings.push(`Large quantity (${quantityNum}) for ${width}mm x ${length}m - consider breaking into smaller batches`);
+            }
+        }
+
+        // Show warnings if any
+        if (warnings.length > 0) {
+            console.warn('Validation warnings:', warnings);
+            // Could show these to user in a non-blocking way
+        }
+
+        // Warn if total demand is very high
+        if (totalDemand > 10000) {
+            console.warn(`Very high total demand (${totalDemand} pieces) - optimization may take longer`);
         }
 
         return true;
@@ -103,11 +158,12 @@ class SteelOptimizer {
 
         for (const row of rows) {
             const width = parseInt(row.querySelector('.width-select').value);
-            const length = parseInt(row.querySelector('.length-input').value);
+            const lengthInMeters = parseFloat(row.querySelector('.length-input').value);
             const quantity = parseInt(row.querySelector('.quantity-input').value);
 
-            if (width && length && quantity) {
-                orders.push({ width, length, quantity });
+            if (width && lengthInMeters && quantity) {
+                const lengthInMm = Math.round(lengthInMeters * 1000); // Convert meters to mm
+                orders.push({ width, length: lengthInMm, quantity });
             }
         }
 
@@ -136,8 +192,273 @@ class SteelOptimizer {
         // Sort pieces by length (descending) for better optimization
         pieces.sort((a, b) => b.length - a.length);
 
-        const results = this.greedyOptimization(pieces);
+        const results = this.advancedOptimization(pieces);
         this.displayResults(results);
+    }
+
+    // Advanced optimization using best-fit decreasing with subset-sum optimization
+    advancedOptimization(pieces) {
+        const bars = [];
+        const remainders = [];
+        let totalWaste = 0;
+        let totalUsed = 0;
+        
+        // Load existing remainders as virtual inventory
+        const virtualInventory = this.loadVirtualInventory();
+        
+        // Group pieces by width for width-specific optimization
+        const piecesByWidth = {};
+        pieces.forEach(piece => {
+            if (!piecesByWidth[piece.width]) {
+                piecesByWidth[piece.width] = [];
+            }
+            piecesByWidth[piece.width].push(piece);
+        });
+
+        // Process each width group separately, considering virtual inventory
+        Object.keys(piecesByWidth).forEach(width => {
+            const widthPieces = piecesByWidth[width];
+            const widthVirtualInventory = virtualInventory[width] || [];
+            const widthBars = this.optimizeWidthGroupWithInventory(parseInt(width), widthPieces, widthVirtualInventory);
+            bars.push(...widthBars);
+        });
+
+        // Calculate remainders and waste, and save to virtual inventory
+        const newRemainders = [];
+        bars.forEach(bar => {
+            if (bar.remaining > 0) {
+                const remainder = {
+                    barNumber: bar.barNumber,
+                    width: bar.width,
+                    remainderLength: bar.remaining,
+                    usable: bar.remaining >= this.getMinUsableLength()
+                };
+                remainders.push(remainder);
+                newRemainders.push(remainder);
+                totalWaste += bar.remaining;
+            }
+            totalUsed += bar.totalUsed;
+        });
+
+        // Save new remainders to virtual inventory for future use
+        this.updateVirtualInventoryWithNewRemainders(newRemainders);
+
+        const wastePercentage = ((totalWaste / (bars.length * this.baseLength)) * 100).toFixed(2);
+
+        return {
+            bars,
+            remainders,
+            totalBars: bars.length,
+            totalWaste: parseFloat(wastePercentage),
+            totalRemainder: totalWaste,
+            totalUsed
+        };
+    }
+
+    // Optimize pieces of the same width using subset-sum approach
+    optimizeWidthGroup(width, pieces) {
+        const bars = [];
+        let remainingPieces = [...pieces];
+        let barNumber = 1;
+
+        while (remainingPieces.length > 0) {
+            // Use subset-sum to find optimal combination for this bar
+            const { selectedPieces, remainingLength } = this.findOptimalSubset(remainingPieces, this.baseLength);
+            
+            if (selectedPieces.length === 0) {
+                // Fallback: place the largest remaining piece
+                const largestPiece = remainingPieces.reduce((max, piece) => 
+                    piece.length > max.length ? piece : max
+                );
+                selectedPieces.push(largestPiece);
+            }
+
+            // Create new bar with selected pieces
+            const newBar = {
+                barNumber: barNumber++,
+                pieces: selectedPieces,
+                remaining: this.baseLength - selectedPieces.reduce((sum, piece) => sum + piece.length, 0),
+                totalUsed: selectedPieces.reduce((sum, piece) => sum + piece.length, 0),
+                width: width
+            };
+            bars.push(newBar);
+
+            // Remove used pieces from remaining list
+            selectedPieces.forEach(usedPiece => {
+                const index = remainingPieces.findIndex(piece => piece === usedPiece);
+                if (index !== -1) {
+                    remainingPieces.splice(index, 1);
+                }
+            });
+        }
+
+        return bars;
+    }
+
+    // Find optimal subset using dynamic programming approach
+    findOptimalSubset(pieces, maxLength) {
+        const n = pieces.length;
+        const dp = Array(n + 1).fill(null).map(() => Array(maxLength + 1).fill(false));
+        const parent = Array(n + 1).fill(null).map(() => Array(maxLength + 1).fill(-1));
+        
+        dp[0][0] = true;
+        
+        // Fill DP table
+        for (let i = 1; i <= n; i++) {
+            const pieceLength = pieces[i - 1].length;
+            for (let j = 0; j <= maxLength; j++) {
+                dp[i][j] = dp[i - 1][j];
+                if (j >= pieceLength && dp[i - 1][j - pieceLength]) {
+                    dp[i][j] = true;
+                    parent[i][j] = j - pieceLength;
+                }
+            }
+        }
+        
+        // Find the best achievable length
+        let bestLength = 0;
+        for (let j = maxLength; j >= 0; j--) {
+            if (dp[n][j]) {
+                bestLength = j;
+                break;
+            }
+        }
+        
+        // Reconstruct selected pieces
+        const selectedPieces = [];
+        let currentLength = bestLength;
+        for (let i = n; i > 0 && currentLength > 0; i--) {
+            if (parent[i][currentLength] !== -1) {
+                selectedPieces.push(pieces[i - 1]);
+                currentLength = parent[i][currentLength];
+            }
+        }
+        
+        return {
+            selectedPieces,
+            remainingLength: maxLength - bestLength
+        };
+    }
+
+    // Load virtual inventory from localStorage
+    loadVirtualInventory() {
+        const savedInventory = localStorage.getItem('steelOptimizerVirtualInventory');
+        if (savedInventory) {
+            try {
+                return JSON.parse(savedInventory);
+            } catch (e) {
+                console.error('Error loading virtual inventory:', e);
+            }
+        }
+        return {};
+    }
+
+    // Save virtual inventory to localStorage
+    saveVirtualInventory(inventory) {
+        localStorage.setItem('steelOptimizerVirtualInventory', JSON.stringify(inventory));
+    }
+
+    // Optimize pieces of the same width considering virtual inventory
+    optimizeWidthGroupWithInventory(width, pieces, virtualInventory) {
+        const bars = [];
+        let remainingPieces = [...pieces];
+        let barNumber = 1;
+        let usedVirtualInventory = [];
+
+        // First, try to use virtual inventory (remainders from previous runs)
+        virtualInventory.forEach(remainder => {
+            if (remainder.usable && remainder.width === width) {
+                // Try to find pieces that fit in this remainder
+                const fittingPieces = remainingPieces.filter(piece => piece.length <= remainder.remainderLength);
+                if (fittingPieces.length > 0) {
+                    // Use subset-sum to optimize this remainder
+                    const { selectedPieces } = this.findOptimalSubset(fittingPieces, remainder.remainderLength);
+                    
+                    if (selectedPieces.length > 0) {
+                        // Create bar using this remainder
+                        const newBar = {
+                            barNumber: barNumber++,
+                            pieces: selectedPieces,
+                            remaining: remainder.remainderLength - selectedPieces.reduce((sum, piece) => sum + piece.length, 0),
+                            totalUsed: selectedPieces.reduce((sum, piece) => sum + piece.length, 0),
+                            width: width,
+                            fromVirtualInventory: true
+                        };
+                        bars.push(newBar);
+
+                        // Remove used pieces
+                        selectedPieces.forEach(usedPiece => {
+                            const index = remainingPieces.findIndex(piece => piece === usedPiece);
+                            if (index !== -1) {
+                                remainingPieces.splice(index, 1);
+                            }
+                        });
+
+                        usedVirtualInventory.push(remainder);
+                    }
+                }
+            }
+        });
+
+        // Process remaining pieces with new bars
+        while (remainingPieces.length > 0) {
+            const { selectedPieces } = this.findOptimalSubset(remainingPieces, this.baseLength);
+            
+            if (selectedPieces.length === 0) {
+                // Fallback: place the largest remaining piece
+                const largestPiece = remainingPieces.reduce((max, piece) => 
+                    piece.length > max.length ? piece : max
+                );
+                selectedPieces.push(largestPiece);
+            }
+
+            // Create new bar with selected pieces
+            const newBar = {
+                barNumber: barNumber++,
+                pieces: selectedPieces,
+                remaining: this.baseLength - selectedPieces.reduce((sum, piece) => sum + piece.length, 0),
+                totalUsed: selectedPieces.reduce((sum, piece) => sum + piece.length, 0),
+                width: width,
+                fromVirtualInventory: false
+            };
+            bars.push(newBar);
+
+            // Remove used pieces from remaining list
+            selectedPieces.forEach(usedPiece => {
+                const index = remainingPieces.findIndex(piece => piece === usedPiece);
+                if (index !== -1) {
+                    remainingPieces.splice(index, 1);
+                }
+            });
+        }
+
+        // Update virtual inventory by removing used remainders
+        const updatedVirtualInventory = virtualInventory.filter(remainder => 
+            !usedVirtualInventory.includes(remainder)
+        );
+        
+        // Save updated virtual inventory
+        const allVirtualInventory = this.loadVirtualInventory();
+        allVirtualInventory[width] = updatedVirtualInventory;
+        this.saveVirtualInventory(allVirtualInventory);
+
+        return bars;
+    }
+
+    // Update virtual inventory with new remainders
+    updateVirtualInventoryWithNewRemainders(newRemainders) {
+        const currentInventory = this.loadVirtualInventory();
+        
+        newRemainders.forEach(remainder => {
+            if (remainder.usable) {
+                if (!currentInventory[remainder.width]) {
+                    currentInventory[remainder.width] = [];
+                }
+                currentInventory[remainder.width].push(remainder);
+            }
+        });
+        
+        this.saveVirtualInventory(currentInventory);
     }
 
     greedyOptimization(pieces) {
@@ -149,10 +470,11 @@ class SteelOptimizer {
         for (const piece of pieces) {
             let placed = false;
 
-            // Try to place in existing bars
+            // Try to place in existing bars of the same width
             for (let i = 0; i < bars.length; i++) {
                 const bar = bars[i];
-                if (bar.remaining >= piece.length) {
+                // CRITICAL FIX: Only place pieces in bars of the same width
+                if (bar.width === piece.width && bar.remaining >= piece.length) {
                     bar.pieces.push(piece);
                     bar.remaining -= piece.length;
                     bar.totalUsed += piece.length;
@@ -210,45 +532,42 @@ class SteelOptimizer {
     populateSummaryCards(results) {
         document.getElementById('totalBars').textContent = results.totalBars;
         document.getElementById('totalWaste').textContent = results.totalWaste + '%';
-        document.getElementById('totalRemainder').textContent = Math.round(results.totalRemainder) + ' mm';
+        document.getElementById('totalRemainder').textContent = (results.totalRemainder / 1000).toFixed(2) + ' m';
     }
 
     populateCutsTable(bars) {
         const tbody = document.getElementById('cutsTableBody');
         tbody.innerHTML = '';
 
-        // First, collect all pieces across all bars and count them globally
-        const globalPieceCounts = {};
+        // Show each bar's composition
         bars.forEach(bar => {
+            // Group pieces by type within this bar
+            const pieceGroups = {};
             bar.pieces.forEach(piece => {
                 const key = `${piece.width}x${piece.length}`;
-                if (!globalPieceCounts[key]) {
-                    globalPieceCounts[key] = {
+                if (!pieceGroups[key]) {
+                    pieceGroups[key] = {
                         width: piece.width,
                         length: piece.length,
-                        count: 0,
-                        bars: []
+                        count: 0
                     };
                 }
-                globalPieceCounts[key].count++;
-                if (!globalPieceCounts[key].bars.includes(bar.barNumber)) {
-                    globalPieceCounts[key].bars.push(bar.barNumber);
-                }
+                pieceGroups[key].count++;
             });
-        });
 
-        // Create rows for each unique piece type with global count
-        Object.values(globalPieceCounts).forEach(group => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${group.bars.length}</td>
-                <td>${group.width} mm</td>
-                <td>${group.length} mm</td>
-                <td>${group.count}</td>
-                <td>-</td>
-                <td>-</td>
-            `;
-            tbody.appendChild(row);
+            // Create rows for each piece type in this bar
+            Object.values(pieceGroups).forEach(group => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>Bar ${bar.barNumber}</td>
+                    <td>${group.width} mm</td>
+                    <td>${(group.length / 1000).toFixed(2)} m</td>
+                    <td>${group.count}</td>
+                    <td>${(bar.totalUsed / 1000).toFixed(2)} m</td>
+                    <td>${(bar.remaining / 1000).toFixed(2)} m</td>
+                `;
+                tbody.appendChild(row);
+            });
         });
     }
 
@@ -261,7 +580,7 @@ class SteelOptimizer {
             row.innerHTML = `
                 <td>${remainder.barNumber}</td>
                 <td>${remainder.width} mm</td>
-                <td>${remainder.remainderLength} mm</td>
+                <td>${(remainder.remainderLength / 1000).toFixed(2)} m</td>
                 <td>${remainder.usable ? 'Yes' : 'No'}</td>
             `;
             tbody.appendChild(row);
@@ -280,8 +599,11 @@ class SteelOptimizer {
     exportToPDF() {
         // Simple PDF export using browser's print functionality
         // In a real implementation, you might use jsPDF library
-        const resultsSection = document.getElementById('resultsSection');
         const printWindow = window.open('', '_blank');
+        
+        // Get only the tables content, not the entire results section
+        const cutsTable = document.getElementById('cutsTable').outerHTML;
+        const remaindersTable = document.getElementById('remaindersTable').outerHTML;
         
         printWindow.document.write(`
             <html>
@@ -296,6 +618,7 @@ class SteelOptimizer {
                         .summary-item { text-align: center; }
                         .summary-number { font-size: 24px; font-weight: bold; color: #e74c3c; }
                         .summary-label { color: #666; }
+                        h2 { color: #333; margin-top: 30px; }
                     </style>
                 </head>
                 <body>
@@ -314,7 +637,12 @@ class SteelOptimizer {
                             <div class="summary-label">Total Remainder</div>
                         </div>
                     </div>
-                    ${resultsSection.innerHTML}
+                    
+                    <h2>Optimized Cuts</h2>
+                    ${cutsTable}
+                    
+                    <h2>Remainders</h2>
+                    ${remaindersTable}
                 </body>
             </html>
         `);
@@ -345,7 +673,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Add tooltips to form elements
     const tooltips = {
         'width-select': 'Select the width of the steel bar from standard sizes',
-        'length-input': 'Enter the required length in millimeters (max 8000mm)',
+        'length-input': 'Enter the required length in meters (max 8.0m)',
         'quantity-input': 'Enter the number of pieces needed'
     };
 
@@ -386,18 +714,19 @@ class DataPersistence {
         if (savedData) {
             try {
                 const orders = JSON.parse(savedData);
-                // Clear existing rows
-                steelOptimizer.clearAll();
+                // Clear existing rows completely
+                document.getElementById('inputTableBody').innerHTML = '';
+                steelOptimizer.rowCount = 0;
                 
                 // Add saved orders
-                orders.forEach(order => {
+                orders.forEach((order, index) => {
                     steelOptimizer.addRow();
                     const rows = document.querySelectorAll('#inputTableBody tr');
-                    const lastRow = rows[rows.length - 1];
+                    const currentRow = rows[rows.length - 1];
                     
-                    lastRow.querySelector('.width-select').value = order.width;
-                    lastRow.querySelector('.length-input').value = order.length;
-                    lastRow.querySelector('.quantity-input').value = order.quantity;
+                    currentRow.querySelector('.width-select').value = order.width;
+                    currentRow.querySelector('.length-input').value = (order.length / 1000).toFixed(1); // Convert mm to m
+                    currentRow.querySelector('.quantity-input').value = order.quantity;
                 });
                 
                 steelOptimizer.updateOptimizeButton();
