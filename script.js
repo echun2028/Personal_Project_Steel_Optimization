@@ -217,19 +217,38 @@ class SteelOptimizer {
         const tbody = document.getElementById('cutsTableBody');
         tbody.innerHTML = '';
 
+        // First, collect all pieces across all bars and count them globally
+        const globalPieceCounts = {};
         bars.forEach(bar => {
-            bar.pieces.forEach((piece, index) => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${bar.barNumber}</td>
-                    <td>${piece.width} mm</td>
-                    <td>${piece.length} mm</td>
-                    <td>1</td>
-                    <td>${bar.totalUsed} mm</td>
-                    <td>${bar.remaining} mm</td>
-                `;
-                tbody.appendChild(row);
+            bar.pieces.forEach(piece => {
+                const key = `${piece.width}x${piece.length}`;
+                if (!globalPieceCounts[key]) {
+                    globalPieceCounts[key] = {
+                        width: piece.width,
+                        length: piece.length,
+                        count: 0,
+                        bars: []
+                    };
+                }
+                globalPieceCounts[key].count++;
+                if (!globalPieceCounts[key].bars.includes(bar.barNumber)) {
+                    globalPieceCounts[key].bars.push(bar.barNumber);
+                }
             });
+        });
+
+        // Create rows for each unique piece type with global count
+        Object.values(globalPieceCounts).forEach(group => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${group.bars.length}</td>
+                <td>${group.width} mm</td>
+                <td>${group.length} mm</td>
+                <td>${group.count}</td>
+                <td>-</td>
+                <td>-</td>
+            `;
+            tbody.appendChild(row);
         });
     }
 
