@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steel Optimization - Calculator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <nav class="top-nav">
+            <div class="nav-container">
+                <h1 class="logo">Steel Optimizer</h1>
+                <ul class="nav-tabs">
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="howto.html">How To</a></li>
+                    <li><a href="calculator.html" class="active">Calculator</a></li>
+                </ul>
+            </div>
+        </nav>
+    </header>
+
+    <main class="main-content">
+        <section class="page-header">
+            <div class="container">
+                <h2>Steel Cutting Calculator</h2>
+                <p class="page-subtitle">Input your steel orders and get optimized cutting layouts</p>
+            </div>
+        </section>
+
+        <section class="calculator-section">
+            <div class="container">
+                <div class="calculator-container">
+                    <div class="input-section">
+                        <div class="section-header">
+                            <h3>Order Input</h3>
+                            <div class="input-controls">
+                                <button id="addRowBtn" class="btn btn-primary">Add Row</button>
+                                <button id="clearAllBtn" class="btn btn-secondary">Clear All</button>
+                            </div>
+                        </div>
+                        
+                        <div class="input-table-container">
+                            <table id="inputTable" class="input-table">
+                                <thead>
+                                    <tr>
+                                        <th>Width (mm)</th>
+                                        <th>Length (mm)</th>
+                                        <th>Quantity (EA)</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="inputTableBody">
+                                    <!-- Rows will be added dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <div class="optimize-section">
+                            <button id="optimizeBtn" class="btn btn-optimize" disabled>Optimize Cuts</button>
+                            <div class="optimize-info">
+                                <p>Base steel bar length: <strong>8,000 mm</strong></p>
+                                <p>Maximum orders: <strong>10 rows</strong></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="results-section" id="resultsSection" style="display: none;">
+                        <div class="section-header">
+                            <h3>Optimization Results</h3>
+                            <div class="results-controls">
+                                <button id="exportBtn" class="btn btn-secondary">Export PDF</button>
+                            </div>
+                        </div>
+                        
+                        <div class="results-summary">
+                            <div class="summary-cards">
+                                <div class="summary-card">
+                                    <div class="summary-number" id="totalBars">0</div>
+                                    <div class="summary-label">Steel Bars Used</div>
+                                </div>
+                                <div class="summary-card">
+                                    <div class="summary-number" id="totalWaste">0%</div>
+                                    <div class="summary-label">Waste Percentage</div>
+                                </div>
+                                <div class="summary-card">
+                                    <div class="summary-number" id="totalRemainder">0 mm</div>
+                                    <div class="summary-label">Total Remainder</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="results-tables">
+                            <div class="table-container">
+                                <h4>Optimized Cuts</h4>
+                                <div class="table-scroll">
+                                    <table id="cutsTable" class="results-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Bar #</th>
+                                                <th>Width</th>
+                                                <th>Length</th>
+                                                <th>Quantity</th>
+                                                <th>Total Used</th>
+                                                <th>Remainder</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="cutsTableBody">
+                                            <!-- Results will be populated here -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div class="table-container">
+                                <h4>Remainders</h4>
+                                <div class="table-scroll">
+                                    <table id="remaindersTable" class="results-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Bar #</th>
+                                                <th>Width</th>
+                                                <th>Remainder Length</th>
+                                                <th>Usable</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="remaindersTableBody">
+                                            <!-- Remainders will be populated here -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2024 Steel Optimizer. Optimizing steel cutting for efficiency and sustainability.</p>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
