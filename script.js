@@ -578,28 +578,19 @@ class SteelOptimizer {
             });
         });
 
-        // Calculate total usage and remaining for each order type
+        // Create simplified summary rows
         Object.values(orderSummary).forEach(order => {
-            const barsUsedArray = Array.from(order.barsUsed).sort((a, b) => a - b);
+            const barsCount = order.barsUsed.size;
             const totalUsedLength = (order.totalQuantity * order.length) / 1000; // Convert to meters
-
-            // Calculate total remaining length from bars used by this order type
-            let totalRemainingForThisOrder = 0;
-            barsUsedArray.forEach(barNum => {
-                const bar = bars.find(b => b.barNumber === barNum);
-                if (bar) {
-                    totalRemainingForThisOrder += bar.remaining;
-                }
-            });
+            const efficiency = ((order.totalQuantity * order.length) / (barsCount * 8000) * 100).toFixed(1);
 
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${barsUsedArray.join(', ')}</td>
-                <td>${order.width} mm</td>
-                <td>${(order.length / 1000).toFixed(2)} m</td>
-                <td>${order.totalQuantity}</td>
-                <td>${totalUsedLength.toFixed(2)} m</td>
-                <td>${(totalRemainingForThisOrder / 1000).toFixed(2)} m</td>
+                <td>${order.width}mm × ${(order.length / 1000).toFixed(1)}m</td>
+                <td>${order.totalQuantity} pieces</td>
+                <td>${barsCount} bars</td>
+                <td>${totalUsedLength.toFixed(1)}m total</td>
+                <td>${efficiency}% efficiency</td>
             `;
             tbody.appendChild(row);
         });
@@ -609,16 +600,53 @@ class SteelOptimizer {
         const tbody = document.getElementById('remaindersTableBody');
         tbody.innerHTML = '';
 
-        remainders.forEach(remainder => {
+        if (remainders.length === 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `<td colspan="4" style="text-align: center; color: #28a745;">✅ No remainders - Perfect optimization!</td>`;
+            tbody.appendChild(row);
+            return;
+        }
+
+        // Group remainders by usability and width
+        const usableRemainders = remainders.filter(r => r.usable);
+        const wasteRemainders = remainders.filter(r => !r.usable);
+
+        // Show usable remainders summary first
+        if (usableRemainders.length > 0) {
+            const usableByWidth = {};
+            usableRemainders.forEach(r => {
+                if (!usableByWidth[r.width]) {
+                    usableByWidth[r.width] = { count: 0, totalLength: 0 };
+                }
+                usableByWidth[r.width].count++;
+                usableByWidth[r.width].totalLength += r.remainderLength;
+            });
+
+            Object.keys(usableByWidth).forEach(width => {
+                const summary = usableByWidth[width];
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td style="color: #28a745;">♻️ Reusable</td>
+                    <td>${width}mm width</td>
+                    <td>${summary.count} pieces</td>
+                    <td>${(summary.totalLength / 1000).toFixed(1)}m total</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        // Show waste summary
+        if (wasteRemainders.length > 0) {
+            const totalWasteLength = wasteRemainders.reduce((sum, r) => sum + r.remainderLength, 0);
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${remainder.barNumber}</td>
-                <td>${remainder.width} mm</td>
-                <td>${(remainder.remainderLength / 1000).toFixed(2)} m</td>
-                <td>${remainder.usable ? 'Yes' : 'No'}</td>
+                <td style="color: #dc3545;">🗑️ Waste</td>
+                <td>Mixed widths</td>
+                <td>${wasteRemainders.length} pieces</td>
+                <td>${(totalWasteLength / 1000).toFixed(1)}m total</td>
             `;
             tbody.appendChild(row);
-        });
+        }
     }
 
     showResults() {
