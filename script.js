@@ -200,7 +200,6 @@ class SteelOptimizer {
     advancedOptimization(pieces) {
         const bars = [];
         const remainders = [];
-        let totalWaste = 0;
         let totalUsed = 0;
         
         // Load existing remainders as virtual inventory
@@ -225,6 +224,9 @@ class SteelOptimizer {
 
         // Calculate remainders and waste, and save to virtual inventory
         const newRemainders = [];
+        let actualWaste = 0; // Only count unusable remainders as waste
+        let totalRemainder = 0; // Total remainder including usable pieces
+
         bars.forEach(bar => {
             if (bar.remaining > 0) {
                 const remainder = {
@@ -235,7 +237,13 @@ class SteelOptimizer {
                 };
                 remainders.push(remainder);
                 newRemainders.push(remainder);
-                totalWaste += bar.remaining;
+
+                totalRemainder += bar.remaining;
+
+                // Only count unusable remainders as actual waste
+                if (!remainder.usable) {
+                    actualWaste += bar.remaining;
+                }
             }
             totalUsed += bar.totalUsed;
         });
@@ -243,14 +251,16 @@ class SteelOptimizer {
         // Save new remainders to virtual inventory for future use
         this.updateVirtualInventoryWithNewRemainders(newRemainders);
 
-        const wastePercentage = ((totalWaste / (bars.length * this.baseLength)) * 100).toFixed(2);
+        // Calculate waste percentage based on actual waste (unusable remainders only)
+        const wastePercentage = ((actualWaste / (bars.length * this.baseLength)) * 100).toFixed(2);
 
         return {
             bars,
             remainders,
             totalBars: bars.length,
-            totalWaste: parseFloat(wastePercentage),
-            totalRemainder: totalWaste,
+            totalWaste: parseFloat(wastePercentage), // Only unusable remainders
+            totalRemainder: totalRemainder, // All remainders including usable ones
+            actualWaste: actualWaste, // Unusable remainders in mm
             totalUsed
         };
     }
@@ -464,7 +474,6 @@ class SteelOptimizer {
     greedyOptimization(pieces) {
         const bars = [];
         const remainders = [];
-        let totalWaste = 0;
         let totalUsed = 0;
 
         for (const piece of pieces) {
@@ -497,27 +506,38 @@ class SteelOptimizer {
         }
 
         // Calculate remainders and waste
+        let actualWaste = 0; // Only count unusable remainders as waste
+        let totalRemainder = 0; // Total remainder including usable pieces
+
         bars.forEach(bar => {
             if (bar.remaining > 0) {
-                remainders.push({
+                const remainder = {
                     barNumber: bar.barNumber,
                     width: bar.width,
                     remainderLength: bar.remaining,
-                    usable: bar.remaining >= 100 // Consider usable if >= 100mm
-                });
-                totalWaste += bar.remaining;
+                    usable: bar.remaining >= this.getMinUsableLength()
+                };
+                remainders.push(remainder);
+
+                totalRemainder += bar.remaining;
+
+                // Only count unusable remainders as actual waste
+                if (!remainder.usable) {
+                    actualWaste += bar.remaining;
+                }
             }
             totalUsed += bar.totalUsed;
         });
 
-        const wastePercentage = ((totalWaste / (bars.length * this.baseLength)) * 100).toFixed(2);
+        const wastePercentage = ((actualWaste / (bars.length * this.baseLength)) * 100).toFixed(2);
 
         return {
             bars,
             remainders,
             totalBars: bars.length,
-            totalWaste: parseFloat(wastePercentage),
-            totalRemainder: totalWaste,
+            totalWaste: parseFloat(wastePercentage), // Only unusable remainders
+            totalRemainder: totalRemainder, // All remainders including usable ones
+            actualWaste: actualWaste, // Unusable remainders in mm
             totalUsed
         };
     }
@@ -539,35 +559,49 @@ class SteelOptimizer {
         const tbody = document.getElementById('cutsTableBody');
         tbody.innerHTML = '';
 
-        // Show each bar's composition
+        // Group all pieces by order type (width x length) across all bars
+        const orderSummary = {};
+
         bars.forEach(bar => {
-            // Group pieces by type within this bar
-            const pieceGroups = {};
             bar.pieces.forEach(piece => {
-                const key = `${piece.width}x${piece.length}`;
-                if (!pieceGroups[key]) {
-                    pieceGroups[key] = {
+                const orderKey = `${piece.width}x${piece.length}`;
+                if (!orderSummary[orderKey]) {
+                    orderSummary[orderKey] = {
                         width: piece.width,
                         length: piece.length,
-                        count: 0
+                        totalQuantity: 0,
+                        barsUsed: new Set()
                     };
                 }
-                pieceGroups[key].count++;
+                orderSummary[orderKey].totalQuantity++;
+                orderSummary[orderKey].barsUsed.add(bar.barNumber);
+            });
+        });
+
+        // Calculate total usage and remaining for each order type
+        Object.values(orderSummary).forEach(order => {
+            const barsUsedArray = Array.from(order.barsUsed).sort((a, b) => a - b);
+            const totalUsedLength = (order.totalQuantity * order.length) / 1000; // Convert to meters
+
+            // Calculate total remaining length from bars used by this order type
+            let totalRemainingForThisOrder = 0;
+            barsUsedArray.forEach(barNum => {
+                const bar = bars.find(b => b.barNumber === barNum);
+                if (bar) {
+                    totalRemainingForThisOrder += bar.remaining;
+                }
             });
 
-            // Create rows for each piece type in this bar
-            Object.values(pieceGroups).forEach(group => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>Bar ${bar.barNumber}</td>
-                    <td>${group.width} mm</td>
-                    <td>${(group.length / 1000).toFixed(2)} m</td>
-                    <td>${group.count}</td>
-                    <td>${(bar.totalUsed / 1000).toFixed(2)} m</td>
-                    <td>${(bar.remaining / 1000).toFixed(2)} m</td>
-                `;
-                tbody.appendChild(row);
-            });
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${barsUsedArray.join(', ')}</td>
+                <td>${order.width} mm</td>
+                <td>${(order.length / 1000).toFixed(2)} m</td>
+                <td>${order.totalQuantity}</td>
+                <td>${totalUsedLength.toFixed(2)} m</td>
+                <td>${(totalRemainingForThisOrder / 1000).toFixed(2)} m</td>
+            `;
+            tbody.appendChild(row);
         });
     }
 
@@ -719,7 +753,7 @@ class DataPersistence {
                 steelOptimizer.rowCount = 0;
                 
                 // Add saved orders
-                orders.forEach((order, index) => {
+                orders.forEach((order) => {
                     steelOptimizer.addRow();
                     const rows = document.querySelectorAll('#inputTableBody tr');
                     const currentRow = rows[rows.length - 1];

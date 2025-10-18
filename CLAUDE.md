@@ -89,22 +89,22 @@ This is a static web application with no build process or server requirements.
 - Next piece 4000mm → Doesn't fit in Bar 1 → Create Bar 2
 - This only works if the orders have both 2000mm and 3000mm. Furthermore, cutting the steel should be consistent all throughout. This means that the pattern shuold be consistent. 
 
-### Step 3: Waste Calculation
-**Total Waste (mm)** = Sum of all remaining spaces in all bars
-**Waste Percentage** = (Total Waste ÷ Total Steel Purchased) × 100
+### Step 3: Waste Calculation (CORRECTED)
+**Actual Waste (mm)** = Sum of all unusable remaining spaces (< minimum usable length)
+**Total Remainder (mm)** = Sum of all remaining spaces including usable pieces
+**Waste Percentage** = (Actual Waste ÷ Total Steel Purchased) × 100
 
 **Mathematical Formula**:
 ```
-Waste % = (Sum of All Remainders) ÷ (Number of Bars × 8000mm) × 100
-==> This is wrong because this is the flow: If there are not enough spaces but some steel are left, those are the "WASTE". 
+Waste % = (Sum of Unusable Remainders Only) ÷ (Number of Bars × 8000mm) × 100
 
-
-Example:
-- Bar 1 remainder: 1000mm
-- Bar 2 remainder: 500mm
-- Bar 3 remainder: 300mm
+CORRECTED Example:
+- Bar 1 remainder: 1000mm (usable, NOT waste)
+- Bar 2 remainder: 500mm (usable, NOT waste)
+- Bar 3 remainder: 50mm (unusable, THIS IS waste)
 - Total bars used: 3
-- Waste % = (1000 + 500 + 300) ÷ (3 × 8000) × 100 = 1800 ÷ 24000 × 100 = 7.5%
+- Actual Waste % = 50 ÷ (3 × 8000) × 100 = 50 ÷ 24000 × 100 = 0.21%
+- Total Remainder = 1000 + 500 + 50 = 1550mm (includes usable pieces)
 ```
 
 ### Step 4: Remainder Classification
@@ -112,12 +112,19 @@ Example:
 - Remainders < 100mm = Considered waste (too small to use)
 - Remainders ≥ 100mm = Marked as potentially reusable
 
-### Step 5: Final Results
+### Step 5: Final Results (IMPROVED)
 - **Total Steel Bars Needed**: Count of 8000mm bars used
-- **Total Waste Percentage**: Calculated as above
-- **Total Waste Length**: Sum of all remainder lengths in millimeters
-- **Cost Efficiency**: Lower waste percentage = better optimization
-Instead of writing down every line of the process, just summarize it into one single line by counting all the quantities for each order in one row. This means that if there were 4 inputs, the line of outputs should also be 4. 
+- **Actual Waste Percentage**: Only counts unusable remainders (< minimum usable length)
+- **Total Remainder Length**: Sum of all remainder lengths including usable pieces
+- **Cost Efficiency**: Lower actual waste percentage = better optimization
+
+**Output Format**: Results are now summarized by order type (width × length), showing:
+- Which bars are used for each order type
+- Total quantity for each order type
+- Total used length for each order type
+- Associated remainders for each order type
+
+This ensures that if there were 4 different order types in input, the output will show 4 summary lines matching those order types. 
 
 ## Code Style
 - Uses ES6+ class syntax and modern JavaScript features
