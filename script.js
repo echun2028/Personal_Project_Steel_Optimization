@@ -162,6 +162,7 @@ class SteelOptimizer {
             const quantity = parseInt(row.querySelector('.quantity-input').value);
 
             if (width && lengthInMeters && quantity) {
+                // More precise conversion to avoid floating point errors
                 const lengthInMm = Math.round(lengthInMeters * 1000); // Convert meters to mm
                 orders.push({ width, length: lengthInMm, quantity });
             }
@@ -202,7 +203,7 @@ class SteelOptimizer {
                 const totalPieces = pieces.length;
                 let results;
 
-                if (totalPieces > 100) {
+                if (totalPieces > 1000) { // Increased threshold to use advanced algorithm more often
                     // Use faster greedy algorithm for large datasets
                     console.log(`Large dataset detected (${totalPieces} pieces), using fast algorithm`);
                     results = this.greedyOptimization(pieces);
@@ -210,6 +211,9 @@ class SteelOptimizer {
                     // Use advanced algorithm for smaller datasets
                     results = this.advancedOptimization(pieces);
                 }
+
+                // Validate results for abnormal efficiency
+                this.validateOptimizationResults(pieces, results);
 
                 this.displayResults(results);
             } catch (error) {
@@ -253,31 +257,15 @@ class SteelOptimizer {
         }
     }
 
-    // Advanced optimization using best-fit decreasing with subset-sum optimization
+    // Advanced optimization using unified approach for all pieces
     advancedOptimization(pieces) {
         const bars = [];
         const remainders = [];
         let totalUsed = 0;
-        
-        // Load existing remainders as virtual inventory
-        const virtualInventory = this.loadVirtualInventory();
-        
-        // Group pieces by width for width-specific optimization
-        const piecesByWidth = {};
-        pieces.forEach(piece => {
-            if (!piecesByWidth[piece.width]) {
-                piecesByWidth[piece.width] = [];
-            }
-            piecesByWidth[piece.width].push(piece);
-        });
 
-        // Process each width group separately, considering virtual inventory
-        Object.keys(piecesByWidth).forEach(width => {
-            const widthPieces = piecesByWidth[width];
-            const widthVirtualInventory = virtualInventory[width] || [];
-            const widthBars = this.optimizeWidthGroupWithInventory(parseInt(width), widthPieces, widthVirtualInventory);
-            bars.push(...widthBars);
-        });
+        // Use unified optimization that considers all pieces together
+        const optimizedBars = this.unifiedOptimization(pieces);
+        bars.push(...optimizedBars);
 
         // Calculate remainders and waste, and save to virtual inventory
         const newRemainders = [];
@@ -285,21 +273,25 @@ class SteelOptimizer {
         let totalRemainder = 0; // Total remainder including usable pieces
 
         bars.forEach(bar => {
-            if (bar.remaining > 0) {
+            // Use small tolerance to handle floating point precision errors
+            const tolerance = 1; // 1mm tolerance
+            const adjustedRemaining = bar.remaining < tolerance ? 0 : bar.remaining;
+
+            if (adjustedRemaining > 0) {
                 const remainder = {
                     barNumber: bar.barNumber,
                     width: bar.width,
-                    remainderLength: bar.remaining,
-                    usable: bar.remaining >= this.getMinUsableLength()
+                    remainderLength: adjustedRemaining,
+                    usable: adjustedRemaining >= this.getMinUsableLength()
                 };
                 remainders.push(remainder);
                 newRemainders.push(remainder);
 
-                totalRemainder += bar.remaining;
+                totalRemainder += adjustedRemaining;
 
                 // Only count unusable remainders as actual waste
                 if (!remainder.usable) {
-                    actualWaste += bar.remaining;
+                    actualWaste += adjustedRemaining;
                 }
             }
             totalUsed += bar.totalUsed;
@@ -319,6 +311,235 @@ class SteelOptimizer {
             totalRemainder: totalRemainder, // All remainders including usable ones
             actualWaste: actualWaste, // Unusable remainders in mm
             totalUsed
+        };
+    }
+
+    // Validate optimization results for abnormal efficiency
+    validateOptimizationResults(pieces, results) {
+        const totalPieceLength = pieces.reduce((sum, piece) => sum + piece.length, 0);
+        const totalBarLength = results.totalBars * this.baseLength;
+        const theoreticalEfficiency = (totalPieceLength / totalBarLength) * 100;
+
+        console.log(`Optimization Validation:
+        - Total pieces: ${pieces.length}
+        - Total piece length: ${totalPieceLength}mm (${(totalPieceLength/1000).toFixed(1)}m)
+        - Total bars used: ${results.totalBars}
+        - Total bar length: ${totalBarLength}mm (${(totalBarLength/1000).toFixed(1)}m)
+        - Theoretical efficiency: ${theoreticalEfficiency.toFixed(1)}%
+        - Actual waste: ${results.totalWaste}%`);
+
+        // Check for same-length pieces efficiency
+        this.validateSameLengthPieces(pieces, results);
+
+        // Alert if efficiency is suspiciously low
+        if (theoreticalEfficiency < 50) {
+            console.warn('⚠️ Very low efficiency detected! This might indicate a problem with the optimization algorithm.');
+        }
+    }
+
+    // Validate efficiency for same-length pieces
+    validateSameLengthPieces(pieces, results) {
+        const piecesByLength = {};
+        pieces.forEach(piece => {
+            if (!piecesByLength[piece.length]) {
+                piecesByLength[piece.length] = 0;
+            }
+            piecesByLength[piece.length]++;
+        });
+
+        Object.keys(piecesByLength).forEach(lengthStr => {
+            const length = parseInt(lengthStr);
+            const count = piecesByLength[lengthStr];
+
+            if (count >= 5) { // Only check if we have 5+ pieces of same length
+                const maxPiecesPerBar = Math.floor(this.baseLength / length);
+                const theoreticalBars = Math.ceil(count / maxPiecesPerBar);
+                const theoreticalEfficiency = ((count * length) / (theoreticalBars * this.baseLength)) * 100;
+
+                console.log(`Same-length validation for ${length}mm pieces:
+                - Count: ${count} pieces
+                - Max per bar: ${maxPiecesPerBar}
+                - Theoretical bars needed: ${theoreticalBars}
+                - Theoretical efficiency: ${theoreticalEfficiency.toFixed(1)}%`);
+
+                if (theoreticalEfficiency > 80 && results.totalWaste > 20) {
+                    console.warn(`⚠️ Inefficient packing detected for ${length}mm pieces!
+                    Expected efficiency: ${theoreticalEfficiency.toFixed(1)}%
+                    Actual waste: ${results.totalWaste}%`);
+                }
+            }
+        });
+    }
+
+    // Unified optimization that considers all pieces together regardless of width
+    unifiedOptimization(pieces) {
+        const bars = [];
+        let remainingPieces = [...pieces];
+        let barNumber = 1;
+
+        // Continue until all pieces are placed
+        while (remainingPieces.length > 0) {
+            // Find the best combination for one 8m bar
+            const { selectedPieces } = this.findBestCombinationForBar(remainingPieces, this.baseLength);
+
+            if (selectedPieces.length === 0) {
+                // Fallback: place the largest remaining piece
+                const largestPiece = remainingPieces.reduce((max, piece) =>
+                    piece.length > max.length ? piece : max
+                );
+                selectedPieces.push(largestPiece);
+            }
+
+            // Create new bar with selected pieces
+            const totalUsedInBar = selectedPieces.reduce((sum, piece) => sum + piece.length, 0);
+            const remainingLength = this.baseLength - totalUsedInBar;
+
+            const newBar = {
+                barNumber: barNumber++,
+                pieces: selectedPieces,
+                remaining: Math.max(0, remainingLength), // Ensure no negative remainders
+                totalUsed: totalUsedInBar,
+                width: 'mixed' // Indicate this bar has mixed widths
+            };
+            bars.push(newBar);
+
+            // Remove used pieces from remaining list
+            selectedPieces.forEach(usedPiece => {
+                const index = remainingPieces.findIndex(piece => piece === usedPiece);
+                if (index !== -1) {
+                    remainingPieces.splice(index, 1);
+                }
+            });
+        }
+
+        return bars;
+    }
+
+    // Find the best combination of pieces that fit in one 8m bar (regardless of width)
+    findBestCombinationForBar(pieces, maxLength) {
+        let bestCombination = [];
+        let bestUsedLength = 0;
+
+        // Group pieces by length for pattern recognition
+        const piecesByLength = {};
+        pieces.forEach(piece => {
+            if (!piecesByLength[piece.length]) {
+                piecesByLength[piece.length] = [];
+            }
+            piecesByLength[piece.length].push(piece);
+        });
+
+        // Try pattern-based optimization first
+        const patternResult = this.findPatternBasedCombination(piecesByLength, maxLength);
+        if (patternResult.selectedPieces.length > 0) {
+            bestCombination = patternResult.selectedPieces;
+            bestUsedLength = patternResult.usedLength;
+        }
+
+        // Always try mixed approach to maximize bar usage
+        const mixedResult = this.findMixedCombination(pieces, maxLength);
+        if (mixedResult.usedLength > bestUsedLength) {
+            bestCombination = mixedResult.selectedPieces;
+            bestUsedLength = mixedResult.usedLength;
+        }
+
+        return {
+            selectedPieces: bestCombination,
+            remainingLength: maxLength - bestUsedLength
+        };
+    }
+
+    // Pattern-based combination: prioritize same-length pieces
+    findPatternBasedCombination(piecesByLength, maxLength) {
+        let bestCombination = [];
+        let bestUsedLength = 0;
+
+        // Try each length pattern
+        Object.keys(piecesByLength).forEach(lengthStr => {
+            const length = parseInt(lengthStr);
+            const piecesOfThisLength = piecesByLength[lengthStr];
+            const maxFit = Math.floor(maxLength / length);
+            const actualFit = Math.min(maxFit, piecesOfThisLength.length);
+
+            if (actualFit > 0) {
+                const usedLength = actualFit * length;
+                if (usedLength > bestUsedLength) {
+                    bestCombination = piecesOfThisLength.slice(0, actualFit);
+                    bestUsedLength = usedLength;
+                }
+            }
+        });
+
+        // Try to fill remaining space with other pieces
+        const remainingSpace = maxLength - bestUsedLength;
+        if (remainingSpace > 0 && bestCombination.length > 0) {
+            const usedPieces = new Set(bestCombination);
+            const remainingPieces = [];
+
+            Object.values(piecesByLength).forEach(pieces => {
+                pieces.forEach(piece => {
+                    if (!usedPieces.has(piece) && piece.length <= remainingSpace) {
+                        remainingPieces.push(piece);
+                    }
+                });
+            });
+
+            // Sort remaining pieces by length (descending)
+            remainingPieces.sort((a, b) => b.length - a.length);
+
+            let currentSpace = remainingSpace;
+            for (const piece of remainingPieces) {
+                if (piece.length <= currentSpace) {
+                    bestCombination.push(piece);
+                    bestUsedLength += piece.length;
+                    currentSpace -= piece.length;
+                }
+            }
+        }
+
+        return {
+            selectedPieces: bestCombination,
+            usedLength: bestUsedLength
+        };
+    }
+
+    // Mixed combination: try different piece combinations
+    findMixedCombination(pieces, maxLength) {
+        let bestCombination = [];
+        let bestUsedLength = 0;
+
+        // Consider all pieces for mixed greedy approaches
+        const piecesToConsider = pieces; // pieces are pre-sorted descending by length
+
+        // Greedy selection (descending order)
+        let currentCombination = [];
+        let currentUsedLength = 0;
+        for (const piece of piecesToConsider) {
+            if (currentUsedLength + piece.length <= maxLength) {
+                currentCombination.push(piece);
+                currentUsedLength += piece.length;
+            }
+        }
+        bestCombination = [...currentCombination];
+        bestUsedLength = currentUsedLength;
+
+        // Greedy selection (ascending order) to catch mixed-length perfect fits
+        currentCombination = [];
+        currentUsedLength = 0;
+        for (const piece of [...piecesToConsider].reverse()) {
+            if (currentUsedLength + piece.length <= maxLength) {
+                currentCombination.push(piece);
+                currentUsedLength += piece.length;
+            }
+        }
+        if (currentUsedLength > bestUsedLength) {
+            bestCombination = [...currentCombination];
+            bestUsedLength = currentUsedLength;
+        }
+
+        return {
+            selectedPieces: bestCombination,
+            usedLength: bestUsedLength
         };
     }
 
@@ -553,11 +774,11 @@ class SteelOptimizer {
         for (const piece of pieces) {
             let placed = false;
 
-            // Try to place in existing bars of the same width
+            // Try to place in existing bars (regardless of width)
             for (let i = 0; i < bars.length; i++) {
                 const bar = bars[i];
-                // CRITICAL FIX: Only place pieces in bars of the same width
-                if (bar.width === piece.width && bar.remaining >= piece.length) {
+                // Place piece if there's enough remaining space
+                if (bar.remaining >= piece.length) {
                     bar.pieces.push(piece);
                     bar.remaining -= piece.length;
                     bar.totalUsed += piece.length;
@@ -568,12 +789,13 @@ class SteelOptimizer {
 
             // If couldn't place in existing bars, create new bar
             if (!placed) {
+                const remainingLength = this.baseLength - piece.length;
                 const newBar = {
                     barNumber: bars.length + 1,
                     pieces: [piece],
-                    remaining: this.baseLength - piece.length,
+                    remaining: Math.max(0, remainingLength), // Ensure no negative remainders
                     totalUsed: piece.length,
-                    width: piece.width
+                    width: 'mixed' // Can contain mixed widths
                 };
                 bars.push(newBar);
             }
@@ -584,20 +806,24 @@ class SteelOptimizer {
         let totalRemainder = 0; // Total remainder including usable pieces
 
         bars.forEach(bar => {
-            if (bar.remaining > 0) {
+            // Use small tolerance to handle floating point precision errors
+            const tolerance = 1; // 1mm tolerance
+            const adjustedRemaining = bar.remaining < tolerance ? 0 : bar.remaining;
+
+            if (adjustedRemaining > 0) {
                 const remainder = {
                     barNumber: bar.barNumber,
                     width: bar.width,
-                    remainderLength: bar.remaining,
-                    usable: bar.remaining >= this.getMinUsableLength()
+                    remainderLength: adjustedRemaining,
+                    usable: adjustedRemaining >= this.getMinUsableLength()
                 };
                 remainders.push(remainder);
 
-                totalRemainder += bar.remaining;
+                totalRemainder += adjustedRemaining;
 
                 // Only count unusable remainders as actual waste
                 if (!remainder.usable) {
-                    actualWaste += bar.remaining;
+                    actualWaste += adjustedRemaining;
                 }
             }
             totalUsed += bar.totalUsed;
@@ -689,19 +915,20 @@ class SteelOptimizer {
         if (usableRemainders.length > 0) {
             const usableByWidth = {};
             usableRemainders.forEach(r => {
-                if (!usableByWidth[r.width]) {
-                    usableByWidth[r.width] = { count: 0, totalLength: 0 };
+                const widthKey = r.width === 'mixed' ? 'mixed' : `${r.width}mm`;
+                if (!usableByWidth[widthKey]) {
+                    usableByWidth[widthKey] = { count: 0, totalLength: 0 };
                 }
-                usableByWidth[r.width].count++;
-                usableByWidth[r.width].totalLength += r.remainderLength;
+                usableByWidth[widthKey].count++;
+                usableByWidth[widthKey].totalLength += r.remainderLength;
             });
 
-            Object.keys(usableByWidth).forEach(width => {
-                const summary = usableByWidth[width];
+            Object.keys(usableByWidth).forEach(widthKey => {
+                const summary = usableByWidth[widthKey];
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td style="color: #28a745;">♻️ Reusable</td>
-                    <td>${width}mm width</td>
+                    <td>${widthKey === 'mixed' ? 'Mixed widths' : widthKey + ' width'}</td>
                     <td>${summary.count} pieces</td>
                     <td>${(summary.totalLength / 1000).toFixed(1)}m total</td>
                 `;
