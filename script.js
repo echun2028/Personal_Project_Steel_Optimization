@@ -177,23 +177,80 @@ class SteelOptimizer {
             return;
         }
 
-        // Expand orders into individual pieces
-        const pieces = [];
-        orders.forEach(order => {
-            for (let i = 0; i < order.quantity; i++) {
-                pieces.push({
-                    width: order.width,
-                    length: order.length,
-                    originalOrder: order
+        // Show loading indicator
+        this.showLoadingIndicator();
+
+        // Use setTimeout to allow UI to update before heavy computation
+        setTimeout(() => {
+            try {
+                // Expand orders into individual pieces
+                const pieces = [];
+                orders.forEach(order => {
+                    for (let i = 0; i < order.quantity; i++) {
+                        pieces.push({
+                            width: order.width,
+                            length: order.length,
+                            originalOrder: order
+                        });
+                    }
                 });
+
+                // Sort pieces by length (descending) for better optimization
+                pieces.sort((a, b) => b.length - a.length);
+
+                // Check if we should use simplified algorithm for large datasets
+                const totalPieces = pieces.length;
+                let results;
+
+                if (totalPieces > 100) {
+                    // Use faster greedy algorithm for large datasets
+                    console.log(`Large dataset detected (${totalPieces} pieces), using fast algorithm`);
+                    results = this.greedyOptimization(pieces);
+                } else {
+                    // Use advanced algorithm for smaller datasets
+                    results = this.advancedOptimization(pieces);
+                }
+
+                this.displayResults(results);
+            } catch (error) {
+                console.error('Optimization error:', error);
+                alert('An error occurred during optimization. Please try again.');
+            } finally {
+                this.hideLoadingIndicator();
             }
-        });
+        }, 100); // Small delay to allow UI update
+    }
 
-        // Sort pieces by length (descending) for better optimization
-        pieces.sort((a, b) => b.length - a.length);
+    showLoadingIndicator() {
+        const optimizeBtn = document.getElementById('optimizeBtn');
+        const originalText = optimizeBtn.textContent;
+        optimizeBtn.dataset.originalText = originalText;
+        optimizeBtn.textContent = 'Optimizing...';
+        optimizeBtn.disabled = true;
 
-        const results = this.advancedOptimization(pieces);
-        this.displayResults(results);
+        // Add spinner if not exists
+        if (!optimizeBtn.querySelector('.spinner')) {
+            const spinner = document.createElement('span');
+            spinner.className = 'spinner';
+            spinner.innerHTML = ' ⏳';
+            optimizeBtn.appendChild(spinner);
+        }
+
+        // Hide previous results
+        this.hideResults();
+    }
+
+    hideLoadingIndicator() {
+        const optimizeBtn = document.getElementById('optimizeBtn');
+        const originalText = optimizeBtn.dataset.originalText || 'Optimize Cuts';
+        optimizeBtn.textContent = originalText;
+        optimizeBtn.disabled = false;
+
+        // Remove spinner
+        const spinner = optimizeBtn.querySelector('.spinner');
+        if (spinner) {
+            spinner.remove();
+        }
     }
 
     // Advanced optimization using best-fit decreasing with subset-sum optimization
@@ -305,48 +362,65 @@ class SteelOptimizer {
         return bars;
     }
 
-    // Find optimal subset using dynamic programming approach
+    // Find optimal subset using optimized approach
     findOptimalSubset(pieces, maxLength) {
-        const n = pieces.length;
-        const dp = Array(n + 1).fill(null).map(() => Array(maxLength + 1).fill(false));
-        const parent = Array(n + 1).fill(null).map(() => Array(maxLength + 1).fill(-1));
-        
-        dp[0][0] = true;
-        
-        // Fill DP table
-        for (let i = 1; i <= n; i++) {
-            const pieceLength = pieces[i - 1].length;
-            for (let j = 0; j <= maxLength; j++) {
-                dp[i][j] = dp[i - 1][j];
-                if (j >= pieceLength && dp[i - 1][j - pieceLength]) {
-                    dp[i][j] = true;
-                    parent[i][j] = j - pieceLength;
+        // For performance, limit the number of pieces to consider
+        const maxPiecesToConsider = 20;
+        const piecesToUse = pieces.length > maxPiecesToConsider ?
+            pieces.slice(0, maxPiecesToConsider) : pieces;
+
+        // Use greedy approach with backtracking for better performance
+        return this.greedySubsetSelection(piecesToUse, maxLength);
+    }
+
+    // Faster greedy approach with limited backtracking
+    greedySubsetSelection(pieces, maxLength) {
+        let bestCombination = [];
+        let bestUsedLength = 0;
+
+        // Try greedy approach first (fastest)
+        let currentCombination = [];
+        let currentUsedLength = 0;
+
+        for (const piece of pieces) {
+            if (currentUsedLength + piece.length <= maxLength) {
+                currentCombination.push(piece);
+                currentUsedLength += piece.length;
+            }
+        }
+
+        bestCombination = currentCombination;
+        bestUsedLength = currentUsedLength;
+
+        // If we have time and few pieces, try some optimizations
+        if (pieces.length <= 10) {
+            // Try removing smallest piece and adding largest possible
+            for (let i = currentCombination.length - 1; i >= 0; i--) {
+                const testCombination = [...currentCombination];
+                const removedPiece = testCombination.splice(i, 1)[0];
+                let testUsedLength = currentUsedLength - removedPiece.length;
+
+                // Try to add a larger piece
+                for (const piece of pieces) {
+                    if (!testCombination.includes(piece) &&
+                        testUsedLength + piece.length <= maxLength &&
+                        piece.length > removedPiece.length) {
+                        testCombination.push(piece);
+                        testUsedLength += piece.length;
+
+                        if (testUsedLength > bestUsedLength) {
+                            bestCombination = [...testCombination];
+                            bestUsedLength = testUsedLength;
+                        }
+                        break;
+                    }
                 }
             }
         }
-        
-        // Find the best achievable length
-        let bestLength = 0;
-        for (let j = maxLength; j >= 0; j--) {
-            if (dp[n][j]) {
-                bestLength = j;
-                break;
-            }
-        }
-        
-        // Reconstruct selected pieces
-        const selectedPieces = [];
-        let currentLength = bestLength;
-        for (let i = n; i > 0 && currentLength > 0; i--) {
-            if (parent[i][currentLength] !== -1) {
-                selectedPieces.push(pieces[i - 1]);
-                currentLength = parent[i][currentLength];
-            }
-        }
-        
+
         return {
-            selectedPieces,
-            remainingLength: maxLength - bestLength
+            selectedPieces: bestCombination,
+            remainingLength: maxLength - bestUsedLength
         };
     }
 
