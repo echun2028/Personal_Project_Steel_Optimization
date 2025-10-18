@@ -80,13 +80,14 @@ This is a static web application with no build process or server requirements.
 1. Take the longest remaining piece
 2. Check all existing bars in order to see if it fits
 3. Place it in the first bar where: `Remaining Space ≥ Piece Length`
-4. If no existing bar has enough space, create a new 8000mm bar
+4. If no existing bar has enough space, create a new 8000mm bar. If there are not enough spaces but some still left, those are the "WASTE". 
 5. Repeat until all pieces are placed
 
 **Example**:
 - Bar 1: 3000mm piece → Remaining: 8000 - 3000 = 5000mm
 - Next piece 2000mm → Fits in Bar 1 → Remaining: 5000 - 2000 = 3000mm
 - Next piece 4000mm → Doesn't fit in Bar 1 → Create Bar 2
+- This only works if the orders have both 2000mm and 3000mm. Furthermore, cutting the steel should be consistent all throughout. This means that the pattern shuold be consistent. 
 
 ### Step 3: Waste Calculation
 **Total Waste (mm)** = Sum of all remaining spaces in all bars
@@ -95,6 +96,8 @@ This is a static web application with no build process or server requirements.
 **Mathematical Formula**:
 ```
 Waste % = (Sum of All Remainders) ÷ (Number of Bars × 8000mm) × 100
+==> This is wrong because this is the flow: If there are not enough spaces but some steel are left, those are the "WASTE". 
+
 
 Example:
 - Bar 1 remainder: 1000mm
@@ -114,6 +117,7 @@ Example:
 - **Total Waste Percentage**: Calculated as above
 - **Total Waste Length**: Sum of all remainder lengths in millimeters
 - **Cost Efficiency**: Lower waste percentage = better optimization
+Instead of writing down every line of the process, just summarize it into one single line by counting all the quantities for each order in one row. This means that if there were 4 inputs, the line of outputs should also be 4. 
 
 ## Code Style
 - Uses ES6+ class syntax and modern JavaScript features
